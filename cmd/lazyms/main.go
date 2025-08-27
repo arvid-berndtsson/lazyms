@@ -106,6 +106,16 @@ func (i shortcutItem) Title() string       { return i.title }
 func (i shortcutItem) Description() string { return i.desc }
 func (i shortcutItem) FilterValue() string { return i.title + " " + i.desc }
 
+// Items for module sidebar (with numeric labels)
+type moduleItem struct {
+	name, desc string
+	idxLabel   int
+}
+
+func (i moduleItem) Title() string       { return fmt.Sprintf("[%d] %s", i.idxLabel, i.name) }
+func (i moduleItem) Description() string { return i.desc }
+func (i moduleItem) FilterValue() string { return i.name + " " + i.desc }
+
 func formatKeyLabel(keys []string) string {
 	if len(keys) == 0 {
 		return ""
@@ -204,8 +214,8 @@ func initialModel(cfg config.Config) model {
 
 	// Module sidebar list
 	mods := list.New([]list.Item{
-		shortcutItem{title: "resources", desc: "Azure resources"},
-		shortcutItem{title: "incidents", desc: "Security incidents"},
+		moduleItem{name: "resources", desc: "Azure resources", idxLabel: 1},
+		moduleItem{name: "incidents", desc: "Security incidents", idxLabel: 2},
 	}, list.NewDefaultDelegate(), 0, 0)
 	mods.Title = "Modules"
 

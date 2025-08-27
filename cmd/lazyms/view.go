@@ -26,8 +26,8 @@ func (m model) View() string {
 	}
 	leftStyle = leftStyle.Width(m.panes[0].widthCells - 2).Height(m.panes[0].heightCells - 2)
 	rightStyle = rightStyle.Width(m.panes[1].widthCells - 2).Height(m.panes[1].heightCells - 2)
-	leftBox := leftStyle.Render(m.styles.title.Render(" Sidebar ") + "\n" + sidebarInner)
-	rightBox := rightStyle.Render(m.styles.title.Render(" Main ") + "\n" + mainInner)
+	leftBox := leftStyle.Render(m.styles.title.Render(" Modules ") + "\n" + sidebarInner)
+	rightBox := rightStyle.Render(m.styles.title.Render(" [0] Main ") + "\n" + mainInner)
 	row := lipgloss.JoinHorizontal(lipgloss.Top, leftBox, " ", rightBox)
 
 	// Clamp content row to inner width

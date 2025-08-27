@@ -29,6 +29,28 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
+		// Numeric shortcuts like Lazygit: 0 focuses main; 1..9 select module
+		if s := msg.String(); len(s) == 1 && s[0] >= '0' && s[0] <= '9' {
+			if s == "0" {
+				m.setFocus(1)
+				return m, nil
+			}
+			idx := int(s[0] - '1')
+			total := len(m.moduleList.Items())
+			if idx >= 0 && idx < total {
+				// select in sidebar and activate
+				m.moduleList.Select(idx)
+				m.activeModuleIndex = idx
+				if m.activeModuleIndex == 0 { // resources
+					m.panes[1].kind = paneViewport
+					m.panes[1].vp.SetContent("Resources module (main view placeholder)")
+				} else { // incidents or others
+					m.panes[1].kind = paneViewport
+					m.panes[1].vp.SetContent("Incidents module (main view placeholder)")
+				}
+				return m, nil
+			}
+		}
 		// If auth menu is open, route input to it
 		if m.showAuth {
 			var c tea.Cmd
@@ -64,6 +86,26 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, c
 		}
+		// Sidebar navigation and module selection
+		prevIndex := m.moduleList.Index()
+		m.moduleList, _ = m.moduleList.Update(msg)
+		if msg.String() == "enter" || msg.String() == "tab" {
+			m.activeModuleIndex = m.moduleList.Index()
+			// Swap main pane content depending on module selection (placeholder behavior)
+			if m.activeModuleIndex == 0 { // resources
+				m.panes[1].kind = paneViewport
+				m.panes[1].vp.SetContent("Resources module (main view placeholder)")
+			} else { // incidents
+				m.panes[1].kind = paneViewport
+				m.panes[1].vp.SetContent("Incidents module (main view placeholder)")
+			}
+			return m, nil
+		}
+		// If sidebar index changed via arrows, update focus but don’t switch yet
+		if m.moduleList.Index() != prevIndex {
+			return m, nil
+		}
+		// Other global focus keys
 		switch {
 		case key.Matches(msg, keys.Quit):
 			return m, tea.Quit
