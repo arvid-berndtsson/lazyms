@@ -6,6 +6,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/table"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -34,8 +35,17 @@ var keys = keymap{
 	Quit:       key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "quit")),
 }
 
+type paneKind int
+
+const (
+	paneTable paneKind = iota
+	paneViewport
+)
+
 type pane struct {
 	title      string
+	kind       paneKind
+	table      table.Model
 	vp         viewport.Model
 	focused    bool
 	x, y, w, h int
@@ -62,14 +72,31 @@ type model struct {
 }
 
 func initialModel() model {
-	left := viewport.New(40, 10)
-	left.SetContent("Resources…\n(click to focus; wheel to scroll)")
+	// Left pane: table of resources
+	columns := []table.Column{
+		{Title: "Name", Width: 24},
+		{Title: "Type", Width: 24},
+		{Title: "Location", Width: 16},
+	}
+	rows := []table.Row{
+		{"vm-prod-01", "Microsoft.Compute/virtualMachines", "westeurope"},
+		{"stlogs01", "Microsoft.Storage/storageAccounts", "eastus"},
+		{"pip-web-01", "Microsoft.Network/publicIPAddresses", "westeurope"},
+		{"sql-core", "Microsoft.Sql/servers", "swedencentral"},
+	}
+	tbl := table.New(
+		table.WithColumns(columns),
+		table.WithRows(rows),
+		table.WithFocused(true),
+	)
+
+	// Right pane: scrollable viewport for details
 	right := viewport.New(40, 10)
 	right.SetContent("Incidents / Details…\n(Tab to switch focus)")
 	return model{
 		panes: []pane{
-			{title: "Resources", vp: left, focused: true},
-			{title: "Incidents", vp: right, focused: false},
+			{title: "Resources", kind: paneTable, table: tbl, focused: true},
+			{title: "Incidents", kind: paneViewport, vp: right, focused: false},
 		},
 		styles: newStyles(),
 		help:   help.New(),
@@ -81,6 +108,7 @@ func (m model) Init() tea.Cmd {
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
@@ -101,7 +129,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		fp := &m.panes[m.focusIdx]
-		fp.vp, _ = fp.vp.Update(msg)
+		switch fp.kind {
+		case paneTable:
+			fp.table, cmd = fp.table.Update(msg)
+		case paneViewport:
+			fp.vp, cmd = fp.vp.Update(msg)
+		}
 	case tea.MouseMsg:
 		if msg.Action == tea.MouseActionPress {
 			// Focus pane on mouse press inside its bounds
@@ -111,33 +144,66 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					break
 				}
 			}
-			// Forward wheel events to focused viewport
-			if msg.Button == tea.MouseButtonWheelUp || msg.Button == tea.MouseButtonWheelDown {
-				fp := &m.panes[m.focusIdx]
-				fp.vp, _ = fp.vp.Update(msg)
-			}
+		}
+		// Always forward mouse events to focused component (wheel, motion, etc.)
+		fp := &m.panes[m.focusIdx]
+		switch fp.kind {
+		case paneTable:
+			fp.table, cmd = fp.table.Update(msg)
+		case paneViewport:
+			fp.vp, cmd = fp.vp.Update(msg)
 		}
 	}
-	return m, nil
+	return m, cmd
 }
 
 func (m *model) layout() {
 	gap := 1
 	leftW := (m.width - gap) / 2
 	rightW := m.width - gap - leftW
-	h := m.height - 2
-	m.panes[0].x, m.panes[0].y, m.panes[0].w, m.panes[0].h = 0, 0, leftW, h
-	m.panes[0].vp.Width, m.panes[0].vp.Height = leftW-2, h-2
-	m.panes[1].x, m.panes[1].y, m.panes[1].w, m.panes[1].h = leftW+gap, 0, rightW, h
-	m.panes[1].vp.Width, m.panes[1].vp.Height = rightW-2, h-2
+	// Reserve space for the help bar at the bottom
+	helpHeight := lipgloss.Height(m.help.View(keys))
+	if helpHeight < 1 {
+		helpHeight = 1
+	}
+	totalPaneHeight := m.height - helpHeight
+	if totalPaneHeight < 4 {
+		totalPaneHeight = 4
+	}
+	// Content height inside borders minus title line
+	contentH := totalPaneHeight - 3
+	if contentH < 1 {
+		contentH = 1
+	}
+	// Left pane (table)
+	m.panes[0].x, m.panes[0].y, m.panes[0].w, m.panes[0].h = 0, 0, leftW, totalPaneHeight
+	lw := leftW - 2
+	if lw < 1 {
+		lw = 1
+	}
+	m.panes[0].table.SetWidth(lw)
+	m.panes[0].table.SetHeight(contentH)
+	// Right pane (viewport)
+	m.panes[1].x, m.panes[1].y, m.panes[1].w, m.panes[1].h = leftW+gap, 0, rightW, totalPaneHeight
+	rw := rightW - 2
+	if rw < 1 {
+		rw = 1
+	}
+	m.panes[1].vp.Width, m.panes[1].vp.Height = rw, contentH
 }
 
 func (m *model) setFocus(i int) {
 	for j := range m.panes {
 		m.panes[j].focused = false
+		if m.panes[j].kind == paneTable {
+			m.panes[j].table.Blur()
+		}
 	}
 	m.panes[i].focused = true
 	m.focusIdx = i
+	if m.panes[i].kind == paneTable {
+		m.panes[i].table.Focus()
+	}
 }
 
 func inside(mx, my int, p pane) bool {
@@ -146,14 +212,28 @@ func inside(mx, my int, p pane) bool {
 
 func (m model) View() string {
 	var leftBox, rightBox string
+	// Compose inner views per pane kind
+	leftInner := func() string {
+		if m.panes[0].kind == paneTable {
+			return m.panes[0].table.View()
+		}
+		return m.panes[0].vp.View()
+	}()
+	rightInner := func() string {
+		if m.panes[1].kind == paneViewport {
+			return m.panes[1].vp.View()
+		}
+		return m.panes[1].table.View()
+	}()
 	if m.panes[0].focused {
-		leftBox = m.styles.focus.Render(m.styles.title.Render(" "+m.panes[0].title+" ") + "\n" + m.panes[0].vp.View())
-		rightBox = m.styles.blur.Render(m.styles.title.Render(" "+m.panes[1].title+" ") + "\n" + m.panes[1].vp.View())
+		leftBox = m.styles.focus.Render(m.styles.title.Render(" "+m.panes[0].title+" ") + "\n" + leftInner)
+		rightBox = m.styles.blur.Render(m.styles.title.Render(" "+m.panes[1].title+" ") + "\n" + rightInner)
 	} else {
-		leftBox = m.styles.blur.Render(m.styles.title.Render(" "+m.panes[0].title+" ") + "\n" + m.panes[0].vp.View())
-		rightBox = m.styles.focus.Render(m.styles.title.Render(" "+m.panes[1].title+" ") + "\n" + m.panes[1].vp.View())
+		leftBox = m.styles.blur.Render(m.styles.title.Render(" "+m.panes[0].title+" ") + "\n" + leftInner)
+		rightBox = m.styles.focus.Render(m.styles.title.Render(" "+m.panes[1].title+" ") + "\n" + rightInner)
 	}
-	return leftBox + " " + rightBox + "\n" + m.help.View(keys)
+	row := lipgloss.JoinHorizontal(lipgloss.Top, leftBox, " ", rightBox)
+	return row + "\n" + m.help.View(keys)
 }
 
 func main() {
