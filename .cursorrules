@@ -1,0 +1,64 @@
+Cursor Rules for lazyms
+
+Scope and architecture
+- Follow Bubble Tea MVU: keep model/update/view split across files (model.go, keys.go, styles.go, layout.go, view.go, update.go, util.go).
+- Move toward a Lazygit-style layout:
+  - Left sidebar: module list/mini info (fixed/min width).
+  - Main area: active module’s primary view; default split 0.66 of inner width.
+  - Bottom: single-line footer (help left, version/auth right).
+- Modules live under cmd/lazyms/modules/ or internal/ui/modules/ when they grow.
+- Each module provides: ID, Title, PreferredSplitRatio, SidebarView(w,h), MainView(w,h), Update(msg), Resize(w,h), Keymap().
+
+Formatting and edits
+- Preserve existing indentation and spacing. Do NOT reformat unrelated lines.
+- Prefer minimal diffs; only touch code relevant to the change.
+- Do not change public APIs/package structure unless explicitly requested.
+
+Naming
+- Use descriptive names; functions are verbs, variables are nouns.
+- Suffix terminal cell dimensions with “Cells”: widthCells, heightCells, innerWidthCells.
+- Layout locals: columnGapCells, leftPaneWidthCells, rightPaneWidthCells, paneAreaHeightCells, contentAreaHeightCells.
+- Model fields: focusedPaneIndex, statusText, horizontalMarginCells.
+- Helpers: pointInPaneBounds(mx,my,pane) (instead of inside).
+
+Layout invariants
+- innerWidthCells = terminalWidth - 2*horizontalMarginCells
+- leftPaneWidthCells + columnGapCells + rightPaneWidthCells == innerWidthCells
+- paneAreaHeightCells = terminalHeight - (statusLines + footerLines)
+- contentAreaHeightCells = paneAreaHeightCells - 3  (title + top/bottom border)
+- For bordered boxes: componentWidth = paneWidthCells - 2, componentHeight = contentAreaHeightCells
+- Always clamp sizes to >= 1 before assigning; degrade gracefully on tiny terminals.
+
+Global keybindings and labels
+- Global keys: Tab/S-Tab (cycle modules), C-h/C-l (focus left/right), a (auth), ? (shortcuts), q (quit), [/] (adjust main split by 5%).
+- Normalize labels in help/shortcuts:
+  - "shift+S" → "S"; "ctrl+h" → "C-h"; arrows as "←/→/↑/↓"; "shift+tab" → "S-tab".
+
+Overlays (auth, shortcuts)
+- Overlays consume input first; ESC/Enter/"?" close as appropriate.
+- Center within innerWidthCells and terminalHeight. Do not modify underlying layout.
+
+Auth best practice
+- Default to Azure CLI credential; on failure, prompt via Auth menu for Device Code.
+- Only run `az login` when the user explicitly chooses it.
+- Never persist tokens on disk; avoid PII in logs.
+
+Dependencies and build
+- After adding deps: `go mod tidy`.
+- Build all packages for CI: `go build ./...`.
+- Build the binary: `go build -o lazyms ./cmd/lazyms`.
+- Inject version info with `-ldflags` for releases.
+
+Testing
+- Unit test: layout sizing (math invariants), key label normalization, config loader, token-claim parsing.
+- Tests must not require network or `az`; keep auth tests offline.
+
+Safety checks
+- Before merging UI changes: verify panes render side-by-side across sizes (80x24, 120x30, ultrawide).
+- Ensure no panics on tiny terminals; clamp and degrade gracefully.
+
+PR/commit hygiene
+- One concern per PR. Include a brief rationale and screenshots/gifs for UI changes.
+- Keep commits small and logically grouped; write imperative commit subjects.
+
+
