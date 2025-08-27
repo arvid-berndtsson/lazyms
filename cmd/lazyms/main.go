@@ -1,14 +1,13 @@
-go
 package main
 
 import (
 	"fmt"
 	"os"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/viewport"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -21,27 +20,31 @@ var (
 type keymap struct {
 	NextPane, PrevPane, FocusLeft, FocusRight, Quit key.Binding
 }
-func (k keymap) ShortHelp() []key.Binding { return []key.Binding{k.NextPane, k.PrevPane, k.FocusLeft, k.FocusRight, k.Quit} }
+
+func (k keymap) ShortHelp() []key.Binding {
+	return []key.Binding{k.NextPane, k.PrevPane, k.FocusLeft, k.FocusRight, k.Quit}
+}
 func (k keymap) FullHelp() [][]key.Binding { return [][]key.Binding{k.ShortHelp()} }
 
 var keys = keymap{
-	NextPane:  key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "next pane")),
-	PrevPane:  key.NewBinding(key.WithKeys("shift+tab"), key.WithHelp("S-tab", "prev pane")),
-	FocusLeft: key.NewBinding(key.WithKeys("ctrl+h", "left"), key.WithHelp("←/C-h", "focus left")),
-	FocusRight:key.NewBinding(key.WithKeys("ctrl+l", "right"), key.WithHelp("→/C-l", "focus right")),
-	Quit:      key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "quit")),
+	NextPane:   key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "next pane")),
+	PrevPane:   key.NewBinding(key.WithKeys("shift+tab"), key.WithHelp("S-tab", "prev pane")),
+	FocusLeft:  key.NewBinding(key.WithKeys("ctrl+h", "left"), key.WithHelp("←/C-h", "focus left")),
+	FocusRight: key.NewBinding(key.WithKeys("ctrl+l", "right"), key.WithHelp("→/C-l", "focus right")),
+	Quit:       key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "quit")),
 }
 
 type pane struct {
-	title   string
-	vp      viewport.Model
-	focused bool
+	title      string
+	vp         viewport.Model
+	focused    bool
 	x, y, w, h int
 }
 
 type styles struct {
 	focus, blur, title lipgloss.Style
 }
+
 func newStyles() styles {
 	return styles{
 		focus: lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("12")),
@@ -51,11 +54,11 @@ func newStyles() styles {
 }
 
 type model struct {
-	panes    []pane
-	focusIdx int
+	panes         []pane
+	focusIdx      int
 	width, height int
-	styles   styles
-	help     help.Model
+	styles        styles
+	help          help.Model
 }
 
 func initialModel() model {
@@ -74,7 +77,7 @@ func initialModel() model {
 }
 
 func (m model) Init() tea.Cmd {
-	return tea.Batch(tea.EnterAltScreen, tea.EnableMouseCellMotion)
+	return tea.EnterAltScreen
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -87,25 +90,32 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, keys.Quit):
 			return m, tea.Quit
 		case key.Matches(msg, keys.NextPane):
-			m.setFocus((m.focusIdx+1)%len(m.panes))
+			m.setFocus((m.focusIdx + 1) % len(m.panes))
 		case key.Matches(msg, keys.PrevPane):
-			m.setFocus((m.focusIdx-1+len(m.panes))%len(m.panes))
+			m.setFocus((m.focusIdx - 1 + len(m.panes)) % len(m.panes))
 		case key.Matches(msg, keys.FocusLeft):
 			m.setFocus(0)
 		case key.Matches(msg, keys.FocusRight):
-			if len(m.panes) > 1 { m.setFocus(1) }
+			if len(m.panes) > 1 {
+				m.setFocus(1)
+			}
 		}
 		fp := &m.panes[m.focusIdx]
 		fp.vp, _ = fp.vp.Update(msg)
 	case tea.MouseMsg:
 		if msg.Action == tea.MouseActionPress {
+			// Focus pane on mouse press inside its bounds
 			for i := range m.panes {
-				if inside(msg.X, msg.Y, m.panes[i]) { m.setFocus(i); break }
+				if inside(msg.X, msg.Y, m.panes[i]) {
+					m.setFocus(i)
+					break
+				}
 			}
-		}
-		if msg.Action == tea.MouseActionWheelUp || msg.Action == tea.MouseActionWheelDown {
-			fp := &m.panes[m.focusIdx]
-			fp.vp, _ = fp.vp.Update(msg)
+			// Forward wheel events to focused viewport
+			if msg.Button == tea.MouseButtonWheelUp || msg.Button == tea.MouseButtonWheelDown {
+				fp := &m.panes[m.focusIdx]
+				fp.vp, _ = fp.vp.Update(msg)
+			}
 		}
 	}
 	return m, nil
@@ -123,7 +133,9 @@ func (m *model) layout() {
 }
 
 func (m *model) setFocus(i int) {
-	for j := range m.panes { m.panes[j].focused = false }
+	for j := range m.panes {
+		m.panes[j].focused = false
+	}
 	m.panes[i].focused = true
 	m.focusIdx = i
 }
@@ -135,11 +147,11 @@ func inside(mx, my int, p pane) bool {
 func (m model) View() string {
 	var leftBox, rightBox string
 	if m.panes[0].focused {
-		leftBox = m.styles.focus.Render(m.styles.title.Render(" "+m.panes[0].title+" ")+"\n"+m.panes[0].vp.View())
-		rightBox = m.styles.blur.Render(m.styles.title.Render(" "+m.panes[1].title+" ")+"\n"+m.panes[1].vp.View())
+		leftBox = m.styles.focus.Render(m.styles.title.Render(" "+m.panes[0].title+" ") + "\n" + m.panes[0].vp.View())
+		rightBox = m.styles.blur.Render(m.styles.title.Render(" "+m.panes[1].title+" ") + "\n" + m.panes[1].vp.View())
 	} else {
-		leftBox = m.styles.blur.Render(m.styles.title.Render(" "+m.panes[0].title+" ")+"\n"+m.panes[0].vp.View())
-		rightBox = m.styles.focus.Render(m.styles.title.Render(" "+m.panes[1].title+" ")+"\n"+m.panes[1].vp.View())
+		leftBox = m.styles.blur.Render(m.styles.title.Render(" "+m.panes[0].title+" ") + "\n" + m.panes[0].vp.View())
+		rightBox = m.styles.focus.Render(m.styles.title.Render(" "+m.panes[1].title+" ") + "\n" + m.panes[1].vp.View())
 	}
 	return leftBox + " " + rightBox + "\n" + m.help.View(keys)
 }
@@ -150,5 +162,7 @@ func main() {
 		fmt.Println("error:", err)
 		os.Exit(1)
 	}
-	_ = version; _ = commit; _ = date
+	_ = version
+	_ = commit
+	_ = date
 }

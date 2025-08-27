@@ -1,6 +1,7 @@
 # lazyms — Azure Security TUI (Go)
 
 A fast, keyboard-first terminal UI for **Azure/Microsoft 365 security** work:
+
 - Browse & query Azure resources (via **Azure Resource Graph**)
 - Look up and triage **security incidents**
 - View & **modify** Microsoft security policies (Conditional Access, Intune)
@@ -41,11 +42,13 @@ The tool supports:
   2. Device Code flow: if CLI is unavailable, we print a code & URL to authenticate.
 
 You may set these (optional) in ~/.config/lazyms/config.yaml:
+
 ```yaml
 tenantId: "<your-tenant-guid-or-domain>"
 clientId: "<your-aad-app-client-id>"
 auth: "cli"   # or "devicecode"
 ```
+
 > Note: Microsoft Graph and Azure Resource Manager are different audiences; we request tokens for both as needed. Ensure your AAD app has the required permissions for the endpoints you’ll use.
 
 ## ⌨️ Keybindings
@@ -61,18 +64,21 @@ auth: "cli"   # or "devicecode"
 - q — Quit
 
 Mouse:
+
 - Click focuses a pane
 - Wheel scrolls focused pane
 
 ## 🧪 Development
 
 Lint & test:
+
 ```bash
 golangci-lint run
 go test ./...
 ```
 
 Run in dev:
+
 ```bash
 go run ./cmd/lazyms
 ```
@@ -80,6 +86,7 @@ go run ./cmd/lazyms
 ## 🚢 Release
 
 We use GoReleaser via GitHub Actions. To cut a release:
+
 ```bash
 git tag v0.1.0
 git push origin v0.1.0
@@ -105,4 +112,4 @@ See the repository Issues for milestones:
 
 ## 📝 License
 
-MIT (see LICENSE)
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.

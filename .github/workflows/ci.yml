@@ -1,15 +1,16 @@
-name: Release
+name: CI
 
 on:
   push:
-    tags:
-      - "v*.*.*"
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  goreleaser:
+  build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -32,6 +33,9 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-go-
 
+      - name: Tidy modules
+        run: go mod tidy
+
       - name: Run tests
         run: go test ./...
 
@@ -40,10 +44,3 @@ jobs:
         with:
           version: latest
 
-      - name: Set up GoReleaser
-        uses: goreleaser/goreleaser-action@v6
-        with:
-          version: latest
-          args: release --clean
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
