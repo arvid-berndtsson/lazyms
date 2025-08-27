@@ -9,7 +9,7 @@
 
 ## Milestone 1 — Auth & Config
 
-- Config file ~/.config/azsec-tui/config.yaml (tenantId, clientId, preferred auth: cli|devicecode).
+- Config file ~/.config/lazyms/config.yaml (tenantId, clientId, preferred auth: cli|devicecode).
 - Implement auth: try Azure CLI credential first; fallback to Device Code. Show “Logged in as {UPN} / {tenant}”.
 - Secure token handling in memory; no on-disk tokens.
 
