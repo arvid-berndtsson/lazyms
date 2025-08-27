@@ -1,0 +1,60 @@
+version: 2
+
+project_name: lazyms
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: lazyms
+    main: ./cmd/lazyms/main.go
+    binary: lazyms
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{.Date}}
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    # Optional: filter out unsupported combos
+    ignore:
+      - goos: windows
+        goarch: arm64
+
+archives:
+  - id: default
+    builds:
+      - lazyms
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{- if eq .Os "darwin" }}macOS{{ else }}{{ .Os }}{{ end }}_{{ .Arch }}
+    format_overrides:
+      - goos: windows
+        format: zip
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^chore:'
+      - '^test:'
+
+release:
+  # goreleaser will create a GitHub Release from the tag
+  draft: false
+  prerelease: auto
+
+# (Optional) Homebrew tap settings can go here later
