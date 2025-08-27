@@ -1,15 +1,23 @@
 package main
 
 import (
+	"context"
+	"flag"
 	"fmt"
 	"os"
+	"os/exec"
+	"strings"
 
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/table"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+
+	iauth "github.com/arvid-berndtsson/lazyms/internal/auth"
+	"github.com/arvid-berndtsson/lazyms/internal/config"
 )
 
 var (
@@ -19,11 +27,11 @@ var (
 )
 
 type keymap struct {
-	NextPane, PrevPane, FocusLeft, FocusRight, Quit key.Binding
+	NextPane, PrevPane, FocusLeft, FocusRight, AuthMenu, Shortcuts, Quit key.Binding
 }
 
 func (k keymap) ShortHelp() []key.Binding {
-	return []key.Binding{k.NextPane, k.PrevPane, k.FocusLeft, k.FocusRight, k.Quit}
+	return []key.Binding{k.NextPane, k.PrevPane, k.FocusLeft, k.FocusRight, k.AuthMenu, k.Shortcuts, k.Quit}
 }
 func (k keymap) FullHelp() [][]key.Binding { return [][]key.Binding{k.ShortHelp()} }
 
@@ -32,6 +40,8 @@ var keys = keymap{
 	PrevPane:   key.NewBinding(key.WithKeys("shift+tab"), key.WithHelp("S-tab", "prev pane")),
 	FocusLeft:  key.NewBinding(key.WithKeys("ctrl+h", "left"), key.WithHelp("←/C-h", "focus left")),
 	FocusRight: key.NewBinding(key.WithKeys("ctrl+l", "right"), key.WithHelp("→/C-l", "focus right")),
+	AuthMenu:   key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "auth menu")),
+	Shortcuts:  key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "shortcuts")),
 	Quit:       key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "quit")),
 }
 
@@ -43,35 +53,122 @@ const (
 )
 
 type pane struct {
-	title      string
-	kind       paneKind
-	table      table.Model
-	vp         viewport.Model
-	focused    bool
-	x, y, w, h int
+	title                               string
+	kind                                paneKind
+	table                               table.Model
+	vp                                  viewport.Model
+	focused                             bool
+	posX, posY, widthCells, heightCells int
 }
 
 type styles struct {
-	focus, blur, title lipgloss.Style
+	focus, blur, title, status lipgloss.Style
 }
 
 func newStyles() styles {
 	return styles{
-		focus: lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("12")),
-		blur:  lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("240")),
-		title: lipgloss.NewStyle().Bold(true),
+		focus:  lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("12")),
+		blur:   lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("240")),
+		title:  lipgloss.NewStyle().Bold(true),
+		status: lipgloss.NewStyle().Faint(true),
 	}
 }
 
 type model struct {
-	panes         []pane
-	focusIdx      int
-	width, height int
-	styles        styles
-	help          help.Model
+	panes                 []pane
+	focusedPaneIndex      int
+	width, height         int
+	styles                styles
+	help                  help.Model
+	statusText            string
+	cfg                   config.Config
+	showAuth              bool
+	authMenu              list.Model
+	signedIn              bool
+	showShortcuts         bool
+	shortcuts             list.Model
+	horizontalMarginCells int
+	moduleList            list.Model
+	activeModuleIndex     int
 }
 
-func initialModel() model {
+type authMenuItem struct{ title, desc, action string }
+
+func (i authMenuItem) Title() string       { return i.title }
+func (i authMenuItem) Description() string { return i.desc }
+func (i authMenuItem) FilterValue() string { return i.title }
+
+// Items for shortcuts list
+type shortcutItem struct{ title, desc string }
+
+func (i shortcutItem) Title() string       { return i.title }
+func (i shortcutItem) Description() string { return i.desc }
+func (i shortcutItem) FilterValue() string { return i.title + " " + i.desc }
+
+func formatKeyLabel(keys []string) string {
+	if len(keys) == 0 {
+		return ""
+	}
+	s := keys[0]
+	// Normalize common patterns
+	if s == "shift+tab" {
+		return "S-tab"
+	}
+	if strings.HasPrefix(s, "ctrl+") && len(s) == len("ctrl+")+1 {
+		return "C-" + s[len("ctrl+"):]
+	}
+	if strings.HasPrefix(s, "shift+") && len(s) == len("shift+")+1 {
+		return strings.ToUpper(s[len("shift+"):])
+	}
+	if len(s) == 1 {
+		return s
+	}
+	// arrows
+	switch s {
+	case "left":
+		return "←"
+	case "right":
+		return "→"
+	case "up":
+		return "↑"
+	case "down":
+		return "↓"
+	}
+	return s
+}
+
+func (m *model) buildShortcutsItems() []list.Item {
+	items := []list.Item{}
+	// Global
+	items = append(items,
+		shortcutItem{title: formatKeyLabel(keys.NextPane.Keys()), desc: "Next pane [Global]"},
+		shortcutItem{title: formatKeyLabel(keys.PrevPane.Keys()), desc: "Prev pane [Global]"},
+		shortcutItem{title: formatKeyLabel(keys.FocusLeft.Keys()), desc: "Focus left [Global]"},
+		shortcutItem{title: formatKeyLabel(keys.FocusRight.Keys()), desc: "Focus right [Global]"},
+		shortcutItem{title: formatKeyLabel(keys.AuthMenu.Keys()), desc: "Auth menu [Global]"},
+		shortcutItem{title: formatKeyLabel(keys.Shortcuts.Keys()), desc: "Show shortcuts [Global]"},
+		shortcutItem{title: formatKeyLabel(keys.Quit.Keys()), desc: "Quit [Global]"},
+	)
+	// Resources (table) common keys
+	items = append(items,
+		shortcutItem{title: "↑/↓", desc: "Move selection [Resources]"},
+		shortcutItem{title: "PgUp/PgDn", desc: "Page [Resources]"},
+		shortcutItem{title: "Home/End", desc: "Top/Bottom [Resources]"},
+		shortcutItem{title: "Enter", desc: "Open details [Resources]"},
+	)
+	// Incidents (viewport) scrolling
+	items = append(items,
+		shortcutItem{title: "↑/↓", desc: "Scroll [Incidents]"},
+		shortcutItem{title: "PgUp/PgDn", desc: "Page [Incidents]"},
+	)
+	res := make([]list.Item, 0, len(items))
+	for _, it := range items {
+		res = append(res, it)
+	}
+	return res
+}
+
+func initialModel(cfg config.Config) model {
 	// Left pane: table of resources
 	columns := []table.Column{
 		{Title: "Name", Width: 24},
@@ -93,151 +190,106 @@ func initialModel() model {
 	// Right pane: scrollable viewport for details
 	right := viewport.New(40, 10)
 	right.SetContent("Incidents / Details…\n(Tab to switch focus)")
+	items := []list.Item{
+		authMenuItem{title: "Sign in (Azure CLI)", desc: "Run az login and refresh status", action: "cli"},
+		authMenuItem{title: "Sign in (Device Code)", desc: "Interactive device code flow", action: "devicecode"},
+	}
+	menu := list.New(items, list.NewDefaultDelegate(), 0, 0)
+	menu.Title = "Authentication"
+
+	// Shortcuts overlay list (empty for now; populated on open)
+	shorts := list.New([]list.Item{}, list.NewDefaultDelegate(), 0, 0)
+	shorts.Title = "Shortcuts (type to filter, enter/esc/? to close)"
+
+	// Module sidebar list
+	mods := list.New([]list.Item{
+		shortcutItem{title: "resources", desc: "Azure resources"},
+		shortcutItem{title: "incidents", desc: "Security incidents"},
+	}, list.NewDefaultDelegate(), 0, 0)
+	mods.Title = "Modules"
+
 	return model{
 		panes: []pane{
-			{title: "Resources", kind: paneTable, table: tbl, focused: true},
-			{title: "Incidents", kind: paneViewport, vp: right, focused: false},
+			{title: "Sidebar", kind: paneTable, table: tbl, focused: true},
+			{title: "Main", kind: paneViewport, vp: right, focused: false},
 		},
-		styles: newStyles(),
-		help:   help.New(),
+		styles:                newStyles(),
+		help:                  help.New(),
+		statusText:            "Authenticating…",
+		cfg:                   cfg,
+		showAuth:              false,
+		authMenu:              menu,
+		signedIn:              false,
+		showShortcuts:         false,
+		shortcuts:             shorts,
+		horizontalMarginCells: 2,
+		moduleList:            mods,
+		activeModuleIndex:     0,
 	}
 }
 
 func (m model) Init() tea.Cmd {
-	return tea.EnterAltScreen
+	return tea.Batch(tea.EnterAltScreen, authenticateCmd(m.cfg))
 }
 
-func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	var cmd tea.Cmd
-	switch msg := msg.(type) {
-	case tea.WindowSizeMsg:
-		m.width, m.height = msg.Width, msg.Height
-		m.layout()
-	case tea.KeyMsg:
-		switch {
-		case key.Matches(msg, keys.Quit):
-			return m, tea.Quit
-		case key.Matches(msg, keys.NextPane):
-			m.setFocus((m.focusIdx + 1) % len(m.panes))
-		case key.Matches(msg, keys.PrevPane):
-			m.setFocus((m.focusIdx - 1 + len(m.panes)) % len(m.panes))
-		case key.Matches(msg, keys.FocusLeft):
-			m.setFocus(0)
-		case key.Matches(msg, keys.FocusRight):
-			if len(m.panes) > 1 {
-				m.setFocus(1)
-			}
-		}
-		fp := &m.panes[m.focusIdx]
-		switch fp.kind {
-		case paneTable:
-			fp.table, cmd = fp.table.Update(msg)
-		case paneViewport:
-			fp.vp, cmd = fp.vp.Update(msg)
-		}
-	case tea.MouseMsg:
-		if msg.Action == tea.MouseActionPress {
-			// Focus pane on mouse press inside its bounds
-			for i := range m.panes {
-				if inside(msg.X, msg.Y, m.panes[i]) {
-					m.setFocus(i)
-					break
-				}
-			}
-		}
-		// Always forward mouse events to focused component (wheel, motion, etc.)
-		fp := &m.panes[m.focusIdx]
-		switch fp.kind {
-		case paneTable:
-			fp.table, cmd = fp.table.Update(msg)
-		case paneViewport:
-			fp.vp, cmd = fp.vp.Update(msg)
-		}
-	}
-	return m, cmd
+type authResultMsg struct {
+	info iauth.Info
+	err  error
 }
 
-func (m *model) layout() {
-	gap := 1
-	leftW := (m.width - gap) / 2
-	rightW := m.width - gap - leftW
-	// Reserve space for the help bar at the bottom
-	helpHeight := lipgloss.Height(m.help.View(keys))
-	if helpHeight < 1 {
-		helpHeight = 1
-	}
-	totalPaneHeight := m.height - helpHeight
-	if totalPaneHeight < 4 {
-		totalPaneHeight = 4
-	}
-	// Content height inside borders minus title line
-	contentH := totalPaneHeight - 3
-	if contentH < 1 {
-		contentH = 1
-	}
-	// Left pane (table)
-	m.panes[0].x, m.panes[0].y, m.panes[0].w, m.panes[0].h = 0, 0, leftW, totalPaneHeight
-	lw := leftW - 2
-	if lw < 1 {
-		lw = 1
-	}
-	m.panes[0].table.SetWidth(lw)
-	m.panes[0].table.SetHeight(contentH)
-	// Right pane (viewport)
-	m.panes[1].x, m.panes[1].y, m.panes[1].w, m.panes[1].h = leftW+gap, 0, rightW, totalPaneHeight
-	rw := rightW - 2
-	if rw < 1 {
-		rw = 1
-	}
-	m.panes[1].vp.Width, m.panes[1].vp.Height = rw, contentH
-}
-
-func (m *model) setFocus(i int) {
-	for j := range m.panes {
-		m.panes[j].focused = false
-		if m.panes[j].kind == paneTable {
-			m.panes[j].table.Blur()
-		}
-	}
-	m.panes[i].focused = true
-	m.focusIdx = i
-	if m.panes[i].kind == paneTable {
-		m.panes[i].table.Focus()
+func authenticateCmd(cfg config.Config) tea.Cmd {
+	return func() tea.Msg {
+		info, err := iauth.Authenticate(context.Background(), cfg)
+		return authResultMsg{info: info, err: err}
 	}
 }
 
-func inside(mx, my int, p pane) bool {
-	return mx >= p.x && mx < p.x+p.w && my >= p.y && my < p.y+p.h
+type azLoginResultMsg struct{ err error }
+
+func azLoginCmd() tea.Cmd {
+	return func() tea.Msg {
+		// Attempt normal az login flow
+		err := exec.Command("az", "login").Run()
+		return azLoginResultMsg{err: err}
+	}
 }
 
-func (m model) View() string {
-	var leftBox, rightBox string
-	// Compose inner views per pane kind
-	leftInner := func() string {
-		if m.panes[0].kind == paneTable {
-			return m.panes[0].table.View()
-		}
-		return m.panes[0].vp.View()
-	}()
-	rightInner := func() string {
-		if m.panes[1].kind == paneViewport {
-			return m.panes[1].vp.View()
-		}
-		return m.panes[1].table.View()
-	}()
-	if m.panes[0].focused {
-		leftBox = m.styles.focus.Render(m.styles.title.Render(" "+m.panes[0].title+" ") + "\n" + leftInner)
-		rightBox = m.styles.blur.Render(m.styles.title.Render(" "+m.panes[1].title+" ") + "\n" + rightInner)
-	} else {
-		leftBox = m.styles.blur.Render(m.styles.title.Render(" "+m.panes[0].title+" ") + "\n" + leftInner)
-		rightBox = m.styles.focus.Render(m.styles.title.Render(" "+m.panes[1].title+" ") + "\n" + rightInner)
-	}
-	row := lipgloss.JoinHorizontal(lipgloss.Top, leftBox, " ", rightBox)
-	return row + "\n" + m.help.View(keys)
-}
+// layout(), Update(), and View() moved to layout.go, input.go, and view.go
 
 func main() {
-	p := tea.NewProgram(initialModel(), tea.WithMouseCellMotion())
+	// CLI flags
+	flagHelpShort := flag.Bool("h", false, "Show help")
+	flagHelpLong := flag.Bool("help", false, "Show help")
+	flagAuth := flag.String("auth", "", "Authentication method: cli (default) or devicecode")
+	flagTenant := flag.String("tenant", "", "Azure tenant ID (GUID)")
+	flagClientID := flag.String("client-id", "", "Client (application) ID for device code auth")
+	flag.Usage = func() {
+		fmt.Fprintf(flag.CommandLine.Output(), "lazyms - Azure security TUI\n\n")
+		fmt.Fprintf(flag.CommandLine.Output(), "Usage: lazyms [flags]\n\n")
+		fmt.Fprintf(flag.CommandLine.Output(), "Flags:\n")
+		flag.PrintDefaults()
+		fmt.Fprintf(flag.CommandLine.Output(), "\nKeys: Tab/Shift+Tab switch panes, Ctrl+h/l focus, q to quit.\n")
+	}
+	flag.Parse()
+
+	if *flagHelpShort || *flagHelpLong {
+		flag.Usage()
+		return
+	}
+
+	// Load config and apply flag overrides
+	cfg, _ := config.Load()
+	if *flagAuth != "" {
+		cfg.PreferredAuth = *flagAuth
+	}
+	if *flagTenant != "" {
+		cfg.TenantID = *flagTenant
+	}
+	if *flagClientID != "" {
+		cfg.ClientID = *flagClientID
+	}
+
+	p := tea.NewProgram(initialModel(cfg), tea.WithMouseCellMotion())
 	if _, err := p.Run(); err != nil {
 		fmt.Println("error:", err)
 		os.Exit(1)
