@@ -1,8 +1,6 @@
 package main
 
 import (
-	"strings"
-
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -39,15 +37,9 @@ func (m model) View() string {
 	}
 	row = lipgloss.NewStyle().Width(innerWidthCells).Render(row)
 
-	// Footer: help left, version+signin right, single line
+	// Footer: help left, version right, single line
 	helpLeft := m.help.View(keys)
-	rightParts := []string{"v" + version}
-	if m.signedIn {
-		rightParts = append(rightParts, "signed in")
-	} else {
-		rightParts = append(rightParts, "signed out")
-	}
-	rightText := strings.Join(rightParts, " · ")
+	rightText := "v" + version
 	leftWidth := (innerWidthCells * 2) / 3
 	if leftWidth < 1 {
 		leftWidth = 1
@@ -62,7 +54,7 @@ func (m model) View() string {
 		lipgloss.NewStyle().Width(rightWidth).Align(lipgloss.Right).Render(rightText),
 	)
 
-	container := lipgloss.NewStyle().Width(m.width).PaddingLeft(m.horizontalMarginCells).PaddingRight(m.horizontalMarginCells)
+	container := lipgloss.NewStyle().Width(m.width).PaddingLeft(m.horizontalMarginCells).PaddingRight(m.horizontalMarginCells).PaddingTop(m.topMarginCells)
 
 	content := row + "\n" + m.styles.status.Render(m.statusText) + "\n" + footer
 	return container.Render(content)

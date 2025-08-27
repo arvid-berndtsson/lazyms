@@ -90,6 +90,7 @@ type model struct {
 	horizontalMarginCells int
 	moduleList            list.Model
 	activeModuleIndex     int
+	topMarginCells        int
 }
 
 type authMenuItem struct{ title, desc, action string }
@@ -225,6 +226,7 @@ func initialModel(cfg config.Config) model {
 		horizontalMarginCells: 2,
 		moduleList:            mods,
 		activeModuleIndex:     0,
+		topMarginCells:        1,
 	}
 }
 
